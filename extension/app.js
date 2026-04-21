@@ -799,13 +799,14 @@ function getShortcutFaviconUrl(url) {
 function renderShortcutCard(item) {
   const shortcutId = escapeHtml(item.id);
   const shortcutUrl = escapeHtml(item.url);
-  const shortcutTitle = escapeHtml(item.title || inferShortcutTitle(item.url));
+  const displayTitle = item.title || inferShortcutTitle(item.url) || item.url || 'Shortcut';
+  const shortcutTitle = escapeHtml(displayTitle);
   const faviconUrl = getShortcutFaviconUrl(item.url);
-  const fallback = escapeHtml((item.title || inferShortcutTitle(item.url) || '?').trim().charAt(0).toUpperCase());
+  const fallback = escapeHtml((displayTitle || '?').trim().charAt(0).toUpperCase());
 
   return `
     <div class="shortcut-chip">
-      <button type="button" class="shortcut-chip-open" data-action="open-shortcut" data-shortcut-id="${shortcutId}" data-shortcut-url="${shortcutUrl}" title="Open ${shortcutTitle}">
+      <button type="button" class="shortcut-chip-open" data-action="open-shortcut" data-shortcut-id="${shortcutId}" data-shortcut-url="${shortcutUrl}" aria-label="Open ${shortcutTitle}">
         <span class="shortcut-chip-icon">
           ${faviconUrl
             ? `<img class="shortcut-chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
@@ -938,32 +939,6 @@ async function removeShortcutItem(id) {
 async function openShortcut(url) {
   const normalizedUrl = normalizeShortcutUrl(url);
   if (!normalizedUrl) return;
-
-  const allTabs = await chrome.tabs.query({});
-  let matches = allTabs.filter(tab => tab.url === normalizedUrl);
-
-  if (matches.length === 0) {
-    try {
-      const targetHost = new URL(normalizedUrl).hostname;
-      matches = allTabs.filter(tab => {
-        try {
-          return new URL(tab.url).hostname === targetHost;
-        } catch {
-          return false;
-        }
-      });
-    } catch {
-      matches = [];
-    }
-  }
-
-  if (matches.length > 0) {
-    const currentWindow = await chrome.windows.getCurrent();
-    const match = matches.find(tab => tab.windowId !== currentWindow.id) || matches[0];
-    await chrome.tabs.update(match.id, { active: true });
-    await chrome.windows.update(match.windowId, { focused: true });
-    return;
-  }
 
   const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
   if (activeTab?.id) {

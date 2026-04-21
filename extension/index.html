@@ -40,7 +40,7 @@
             </button>
           </div>
 
-          <form id="shortcutEditorForm" class="shortcut-editor-form">
+          <form id="shortcutEditorForm" class="shortcut-editor-form" novalidate>
             <label class="shortcut-field">
               <span>Title</span>
               <input id="shortcutTitleInput" name="title" type="text" placeholder="Gmail" autocomplete="off">
@@ -48,7 +48,7 @@
 
             <label class="shortcut-field">
               <span>URL</span>
-              <input id="shortcutUrlInput" name="url" type="url" placeholder="https://mail.google.com/" autocomplete="off" inputmode="url">
+              <input id="shortcutUrlInput" name="url" type="text" placeholder="google.com or https://mail.google.com/" autocomplete="off" inputmode="url" autocapitalize="off" spellcheck="false">
             </label>
 
             <div class="shortcut-editor-actions">
