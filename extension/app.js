@@ -806,10 +806,12 @@ function renderShortcutCard(item) {
   return `
     <div class="shortcut-chip">
       <button type="button" class="shortcut-chip-open" data-action="open-shortcut" data-shortcut-id="${shortcutId}" data-shortcut-url="${shortcutUrl}" title="Open ${shortcutTitle}">
-        ${faviconUrl
-          ? `<img class="shortcut-chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
-          : ''}
-        <div class="shortcut-chip-fallback" ${faviconUrl ? 'style="display:none"' : ''}>${fallback}</div>
+        <span class="shortcut-chip-icon">
+          ${faviconUrl
+            ? `<img class="shortcut-chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+            : ''}
+          <span class="shortcut-chip-fallback" ${faviconUrl ? 'style="display:none"' : ''}>${fallback}</span>
+        </span>
         <span class="shortcut-chip-title">${shortcutTitle}</span>
       </button>
       <div class="shortcut-chip-actions">
@@ -823,13 +825,25 @@ function renderShortcutCard(item) {
     </div>`;
 }
 
+function renderShortcutAddButton() {
+  return `
+    <button type="button" class="shortcut-add-tile" data-action="open-shortcut-form" title="Add shortcut" aria-label="Add shortcut">
+      <span class="shortcut-add-icon" aria-hidden="true">
+        <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
+        </svg>
+      </span>
+      <span class="shortcut-add-label">Add shortcut</span>
+    </button>`;
+}
+
 async function renderShortcutSection() {
   const section = document.getElementById('shortcutSection');
   const grid = document.getElementById('shortcutGrid');
   if (!section || !grid) return;
 
   shortcutLinks = await loadShortcutItems();
-  grid.innerHTML = shortcutLinks.length > 0 ? shortcutLinks.map(renderShortcutCard).join('') : '';
+  grid.innerHTML = `${shortcutLinks.map(renderShortcutCard).join('')}${renderShortcutAddButton()}`;
   section.style.display = 'block';
 }
 
