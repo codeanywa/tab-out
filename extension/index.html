@@ -15,7 +15,6 @@
 <div class="container">
 
 
-
   <!-- ================================================================
        HEADER — greeting on the left
        ================================================================ -->
@@ -25,6 +24,45 @@
       <h1 id="greeting"></h1>
       <!-- "Friday, April 4, 2026" — written by getDateDisplay() in app.js -->
       <div class="date" id="dateDisplay"></div>
+    </div>
+
+    <div class="header-right">
+      <section class="shortcut-rail" id="shortcutSection">
+        <div class="shortcut-rail-top">
+          <div class="shortcut-rail-label">Shortcuts</div>
+          <button type="button" class="shortcut-add-button" data-action="open-shortcut-form" title="Add shortcut">+</button>
+        </div>
+
+        <div class="shortcut-chip-row" id="shortcutGrid"></div>
+
+        <div class="shortcut-editor-popup" id="shortcutEditor" style="display:none">
+          <div class="shortcut-editor-head">
+            <div class="shortcut-editor-title" id="shortcutEditorTitle">Add shortcut</div>
+            <button type="button" class="shortcut-editor-close" data-action="cancel-shortcut-form" title="Close">
+              <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M6 18 18 6M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+
+          <form id="shortcutEditorForm" class="shortcut-editor-form">
+            <label class="shortcut-field">
+              <span>Title</span>
+              <input id="shortcutTitleInput" name="title" type="text" placeholder="Gmail" autocomplete="off">
+            </label>
+
+            <label class="shortcut-field">
+              <span>URL</span>
+              <input id="shortcutUrlInput" name="url" type="url" placeholder="https://mail.google.com/" autocomplete="off" inputmode="url">
+            </label>
+
+            <div class="shortcut-editor-actions">
+              <button type="button" class="action-btn" data-action="cancel-shortcut-form">Cancel</button>
+              <button type="submit" class="action-btn primary" id="shortcutSaveButton">Save shortcut</button>
+            </div>
+          </form>
+        </div>
+      </section>
     </div>
   </header>
 

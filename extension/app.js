@@ -710,6 +710,258 @@ let domainGroups = [];
 
 
 /* ----------------------------------------------------------------
+   SHORTCUTS — synced quick links shown in the sticky header
+   ---------------------------------------------------------------- */
+const SHORTCUTS_STORAGE_KEY = 'quickLinks';
+let shortcutLinks = [];
+let shortcutEditorState = { mode: 'create', id: null };
+
+function escapeHtml(value) {
+  return String(value ?? '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function normalizeShortcutUrl(value) {
+  const rawValue = String(value || '').trim();
+  if (!rawValue) return '';
+  try {
+    return new URL(rawValue).toString();
+  } catch {
+    try {
+      return new URL(`https://${rawValue}`).toString();
+    } catch {
+      return '';
+    }
+  }
+}
+
+function inferShortcutTitle(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return friendlyDomain(hostname) || hostname.replace(/^www\./, '');
+  } catch {
+    return url || '';
+  }
+}
+
+function normalizeShortcutItem(item) {
+  const url = normalizeShortcutUrl(item?.url);
+  if (!url) return null;
+
+  return {
+    id: item?.id || `shortcut-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
+    title: String(item?.title || inferShortcutTitle(url)).trim() || inferShortcutTitle(url),
+    url,
+  };
+}
+
+function dedupeShortcutItems(items) {
+  const seen = new Set();
+  const deduped = [];
+
+  for (const item of items || []) {
+    const normalized = normalizeShortcutItem(item);
+    if (!normalized) continue;
+    const key = normalized.url.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    deduped.push(normalized);
+  }
+
+  return deduped;
+}
+
+async function loadShortcutItems() {
+  const stored = await chrome.storage.sync.get(SHORTCUTS_STORAGE_KEY);
+  return dedupeShortcutItems(stored[SHORTCUTS_STORAGE_KEY] || []);
+}
+
+async function saveShortcutItems(items) {
+  const normalized = dedupeShortcutItems(items);
+  await chrome.storage.sync.set({ [SHORTCUTS_STORAGE_KEY]: normalized });
+  shortcutLinks = normalized;
+  return normalized;
+}
+
+function getShortcutFaviconUrl(url) {
+  try {
+    const hostname = new URL(url).hostname;
+    return hostname ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=32` : '';
+  } catch {
+    return '';
+  }
+}
+
+function renderShortcutCard(item) {
+  const shortcutId = escapeHtml(item.id);
+  const shortcutUrl = escapeHtml(item.url);
+  const shortcutTitle = escapeHtml(item.title || inferShortcutTitle(item.url));
+  const faviconUrl = getShortcutFaviconUrl(item.url);
+  const fallback = escapeHtml((item.title || inferShortcutTitle(item.url) || '?').trim().charAt(0).toUpperCase());
+
+  return `
+    <div class="shortcut-chip">
+      <button type="button" class="shortcut-chip-open" data-action="open-shortcut" data-shortcut-id="${shortcutId}" data-shortcut-url="${shortcutUrl}" title="Open ${shortcutTitle}">
+        ${faviconUrl
+          ? `<img class="shortcut-chip-favicon" src="${faviconUrl}" alt="" onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">`
+          : ''}
+        <div class="shortcut-chip-fallback" ${faviconUrl ? 'style="display:none"' : ''}>${fallback}</div>
+        <span class="shortcut-chip-title">${shortcutTitle}</span>
+      </button>
+      <div class="shortcut-chip-actions">
+        <button type="button" class="shortcut-chip-btn" data-action="edit-shortcut" data-shortcut-id="${shortcutId}" title="Edit shortcut">
+          ${ICONS.edit}
+        </button>
+        <button type="button" class="shortcut-chip-btn" data-action="remove-shortcut" data-shortcut-id="${shortcutId}" title="Remove shortcut">
+          ${ICONS.close}
+        </button>
+      </div>
+    </div>`;
+}
+
+async function renderShortcutSection() {
+  const section = document.getElementById('shortcutSection');
+  const grid = document.getElementById('shortcutGrid');
+  if (!section || !grid) return;
+
+  shortcutLinks = await loadShortcutItems();
+  grid.innerHTML = shortcutLinks.length > 0 ? shortcutLinks.map(renderShortcutCard).join('') : '';
+  section.style.display = 'block';
+}
+
+function closeShortcutEditor() {
+  const editor = document.getElementById('shortcutEditor');
+  const form = document.getElementById('shortcutEditorForm');
+  if (form) form.reset();
+  if (editor) editor.style.display = 'none';
+  shortcutEditorState = { mode: 'create', id: null };
+}
+
+function openShortcutEditor(item = null) {
+  const editor = document.getElementById('shortcutEditor');
+  const titleEl = document.getElementById('shortcutEditorTitle');
+  const titleInput = document.getElementById('shortcutTitleInput');
+  const urlInput = document.getElementById('shortcutUrlInput');
+  const saveButton = document.getElementById('shortcutSaveButton');
+  if (!editor || !titleInput || !urlInput || !saveButton) return;
+
+  shortcutEditorState = item
+    ? { mode: 'edit', id: item.id }
+    : { mode: 'create', id: null };
+
+  if (titleEl) {
+    titleEl.textContent = item ? 'Edit shortcut' : 'Add shortcut';
+  }
+  saveButton.textContent = item ? 'Update shortcut' : 'Save shortcut';
+  titleInput.value = item?.title || '';
+  urlInput.value = item?.url || '';
+  editor.style.display = 'block';
+
+  setTimeout(() => {
+    urlInput.focus();
+    urlInput.select();
+  }, 0);
+}
+
+async function persistShortcutFromForm() {
+  const titleInput = document.getElementById('shortcutTitleInput');
+  const urlInput = document.getElementById('shortcutUrlInput');
+  if (!titleInput || !urlInput) return;
+  const wasEditing = shortcutEditorState.mode === 'edit';
+
+  const title = titleInput.value.trim();
+  const url = normalizeShortcutUrl(urlInput.value);
+
+  if (!url) {
+    showToast('Enter a valid URL');
+    urlInput.focus();
+    return;
+  }
+
+  const currentItems = await loadShortcutItems();
+  const normalized = normalizeShortcutItem({
+    id: shortcutEditorState.id,
+    title: title || inferShortcutTitle(url),
+    url,
+  });
+
+  if (!normalized) {
+    showToast('Enter a valid URL');
+    return;
+  }
+
+  const nextItems = [...currentItems];
+  const byIdIndex = nextItems.findIndex(item => item.id === normalized.id);
+  const byUrlIndex = nextItems.findIndex(item => item.url.toLowerCase() === normalized.url.toLowerCase());
+
+  if (byIdIndex !== -1) {
+    nextItems[byIdIndex] = normalized;
+  } else if (byUrlIndex !== -1) {
+    nextItems[byUrlIndex] = normalized;
+  } else {
+    nextItems.push(normalized);
+  }
+
+  await saveShortcutItems(nextItems);
+  await renderShortcutSection();
+  closeShortcutEditor();
+  showToast(wasEditing ? 'Shortcut updated' : 'Shortcut saved');
+}
+
+async function removeShortcutItem(id) {
+  const currentItems = await loadShortcutItems();
+  const nextItems = currentItems.filter(item => item.id !== id);
+  await saveShortcutItems(nextItems);
+  if (shortcutEditorState.id === id) closeShortcutEditor();
+  await renderShortcutSection();
+  showToast('Shortcut removed');
+}
+
+async function openShortcut(url) {
+  const normalizedUrl = normalizeShortcutUrl(url);
+  if (!normalizedUrl) return;
+
+  const allTabs = await chrome.tabs.query({});
+  let matches = allTabs.filter(tab => tab.url === normalizedUrl);
+
+  if (matches.length === 0) {
+    try {
+      const targetHost = new URL(normalizedUrl).hostname;
+      matches = allTabs.filter(tab => {
+        try {
+          return new URL(tab.url).hostname === targetHost;
+        } catch {
+          return false;
+        }
+      });
+    } catch {
+      matches = [];
+    }
+  }
+
+  if (matches.length > 0) {
+    const currentWindow = await chrome.windows.getCurrent();
+    const match = matches.find(tab => tab.windowId !== currentWindow.id) || matches[0];
+    await chrome.tabs.update(match.id, { active: true });
+    await chrome.windows.update(match.windowId, { focused: true });
+    return;
+  }
+
+  const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (activeTab?.id) {
+    await chrome.tabs.update(activeTab.id, { url: normalizedUrl });
+    return;
+  }
+
+  await chrome.tabs.create({ url: normalizedUrl, active: true });
+}
+
+
+/* ----------------------------------------------------------------
    HELPER: filter out browser-internal pages
    ---------------------------------------------------------------- */
 
@@ -1027,7 +1279,7 @@ async function renderStaticDashboard() {
   if (dateEl)     dateEl.textContent     = getDateDisplay();
 
   // --- Fetch tabs ---
-  await fetchOpenTabs();
+  await Promise.all([renderShortcutSection(), fetchOpenTabs()]);
   const realTabs = getRealTabs();
 
   // --- Group tabs by domain ---
@@ -1187,6 +1439,36 @@ document.addEventListener('click', async (e) => {
   if (!actionEl) return;
 
   const action = actionEl.dataset.action;
+
+  // ---- Shortcut rail actions ----
+  if (action === 'open-shortcut-form') {
+    openShortcutEditor();
+    return;
+  }
+
+  if (action === 'cancel-shortcut-form') {
+    closeShortcutEditor();
+    return;
+  }
+
+  if (action === 'edit-shortcut') {
+    const shortcut = shortcutLinks.find(item => item.id === actionEl.dataset.shortcutId);
+    if (shortcut) openShortcutEditor(shortcut);
+    return;
+  }
+
+  if (action === 'remove-shortcut') {
+    e.stopPropagation();
+    const shortcutId = actionEl.dataset.shortcutId;
+    if (shortcutId) await removeShortcutItem(shortcutId);
+    return;
+  }
+
+  if (action === 'open-shortcut') {
+    const shortcutUrl = actionEl.dataset.shortcutUrl;
+    if (shortcutUrl) await openShortcut(shortcutUrl);
+    return;
+  }
 
   // ---- Close duplicate Tab Out tabs ----
   if (action === 'close-tabout-dupes') {
@@ -1431,6 +1713,12 @@ document.addEventListener('click', async (e) => {
     showToast('All tabs closed. Fresh start.');
     return;
   }
+});
+
+document.addEventListener('submit', async (e) => {
+  if (e.target.id !== 'shortcutEditorForm') return;
+  e.preventDefault();
+  await persistShortcutFromForm();
 });
 
 // ---- Archive toggle — expand/collapse the archive section ----

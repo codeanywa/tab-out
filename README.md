@@ -4,6 +4,8 @@
 
 Tab Out is a Chrome extension that replaces your new tab page with a dashboard of everything you have open. Tabs are grouped by domain, with homepages (Gmail, X, LinkedIn, etc.) pulled into their own group. Close tabs with a satisfying swoosh + confetti.
 
+It also adds a shortcuts strip at the top so you can pin fast links and keep them synced through your Chrome profile.
+
 No server. No account. No external API calls. Just a Chrome extension.
 
 ---
@@ -23,6 +25,7 @@ The agent will walk you through it. Takes about 1 minute.
 ## Features
 
 - **See all your tabs at a glance** on a clean grid, grouped by domain
+- **Pin shortcuts at the top** with quick links you can add, edit, remove, and sync through Chrome profile
 - **Homepages group** pulls Gmail inbox, X home, YouTube, LinkedIn, GitHub homepages into one card
 - **Close tabs with style** with swoosh sound + confetti burst
 - **Duplicate detection** flags when you have the same page open twice, with one-click cleanup
