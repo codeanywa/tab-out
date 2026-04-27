@@ -716,6 +716,18 @@ let domainGroups = [];
 const SHORTCUTS_STORAGE_KEY = 'quickLinks';
 let shortcutLinks = [];
 let shortcutEditorState = { mode: 'create', id: null };
+let shortcutDragState = {
+  draggedId: null,
+  targetId: null,
+  placement: 'after',
+  ignoreClicksUntil: 0,
+};
+let shortcutSuggestionState = {
+  visible: false,
+  filterActive: false,
+  anchorField: null,
+  selectedUrl: '',
+};
 
 function escapeHtml(value) {
   return String(value ?? '')
@@ -758,6 +770,161 @@ function normalizeShortcutItem(item) {
     title: String(item?.title || inferShortcutTitle(url)).trim() || inferShortcutTitle(url),
     url,
   };
+}
+
+function getShortcutTabCandidates() {
+  const seen = new Set();
+
+  return getRealTabs().reduce((items, tab) => {
+    const url = normalizeShortcutUrl(tab.url);
+    if (!url) return items;
+
+    const key = url.toLowerCase();
+    if (seen.has(key)) return items;
+    seen.add(key);
+
+    const cleanedTitle = cleanTitle(smartTitle(stripTitleNoise(tab.title || ''), tab.url), '');
+    items.push({
+      title: cleanedTitle || inferShortcutTitle(url) || url,
+      url,
+      active: Boolean(tab.active),
+    });
+
+    return items;
+  }, []);
+}
+
+function getShortcutSuggestionMatches() {
+  const titleInput = document.getElementById('shortcutTitleInput');
+  const urlInput = document.getElementById('shortcutUrlInput');
+  const titleQuery = shortcutSuggestionState.filterActive && shortcutSuggestionState.anchorField === 'title'
+    ? String(titleInput?.value || '').trim().toLowerCase()
+    : '';
+  const urlQuery = shortcutSuggestionState.filterActive && shortcutSuggestionState.anchorField === 'url'
+    ? String(urlInput?.value || '').trim().toLowerCase()
+    : '';
+
+  return getShortcutTabCandidates().filter(item => {
+    const titleMatch = !titleQuery || item.title.toLowerCase().includes(titleQuery);
+    const urlMatch = !urlQuery || item.url.toLowerCase().includes(urlQuery);
+    return titleMatch && urlMatch;
+  });
+}
+
+function renderShortcutSuggestions() {
+  const panel = document.getElementById('shortcutSuggestionPanel');
+  const list = document.getElementById('shortcutSuggestionList');
+  const urlInput = document.getElementById('shortcutUrlInput');
+  if (!panel || !list) return;
+
+  if (!shortcutSuggestionState.visible) {
+    panel.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+
+  const currentUrl = normalizeShortcutUrl(urlInput?.value) || shortcutSuggestionState.selectedUrl;
+  const matches = getShortcutSuggestionMatches();
+
+  if (matches.length === 0) {
+    list.innerHTML = '<div class="shortcut-suggestion-empty">No matching open tabs</div>';
+    panel.hidden = false;
+    return;
+  }
+
+  list.innerHTML = matches.slice(0, 10).map(item => {
+    const safeTitle = escapeHtml(item.title);
+    const safeUrl = escapeHtml(item.url);
+    const selectedClass = currentUrl && currentUrl === item.url ? ' is-selected' : '';
+    const activeBadge = item.active ? '<span class="shortcut-suggestion-badge">Current</span>' : '';
+
+    return `
+      <button
+        type="button"
+        class="shortcut-suggestion-item${selectedClass}"
+        data-action="select-shortcut-suggestion"
+        data-shortcut-pick-title="${safeTitle}"
+        data-shortcut-pick-url="${safeUrl}">
+        <span class="shortcut-suggestion-copy">
+          <span class="shortcut-suggestion-title">${safeTitle}</span>
+          <span class="shortcut-suggestion-url">${safeUrl}</span>
+        </span>
+        ${activeBadge}
+      </button>`;
+  }).join('');
+  panel.hidden = false;
+}
+
+function showShortcutSuggestions({ filterActive = false } = {}) {
+  shortcutSuggestionState.visible = true;
+  shortcutSuggestionState.filterActive = filterActive;
+  renderShortcutSuggestions();
+}
+
+function hideShortcutSuggestions() {
+  shortcutSuggestionState.visible = false;
+  shortcutSuggestionState.filterActive = false;
+  shortcutSuggestionState.anchorField = null;
+  renderShortcutSuggestions();
+}
+
+function clearShortcutDropIndicators() {
+  const grid = document.getElementById('shortcutGrid');
+  if (grid) grid.classList.remove('shortcut-drop-end');
+  document.querySelectorAll('.shortcut-chip').forEach(chip => {
+    chip.classList.remove('shortcut-drop-before', 'shortcut-drop-after', 'shortcut-dragging');
+  });
+}
+
+function updateShortcutDropIndicator(targetId, placement) {
+  const grid = document.getElementById('shortcutGrid');
+  clearShortcutDropIndicators();
+
+  const draggedChip = shortcutDragState.draggedId
+    ? document.querySelector(`.shortcut-chip[data-shortcut-id="${CSS.escape(shortcutDragState.draggedId)}"]`)
+    : null;
+  if (draggedChip) draggedChip.classList.add('shortcut-dragging');
+
+  if (targetId === '__end__') {
+    if (grid) grid.classList.add('shortcut-drop-end');
+    return;
+  }
+
+  if (!targetId) return;
+  const targetChip = document.querySelector(`.shortcut-chip[data-shortcut-id="${CSS.escape(targetId)}"]`);
+  if (!targetChip) return;
+
+  targetChip.classList.add(placement === 'before' ? 'shortcut-drop-before' : 'shortcut-drop-after');
+}
+
+function moveShortcutItem(items, draggedId, targetId, placement) {
+  const nextItems = [...items];
+  const draggedIndex = nextItems.findIndex(item => item.id === draggedId);
+  if (draggedIndex === -1) return items;
+
+  const [draggedItem] = nextItems.splice(draggedIndex, 1);
+
+  if (!targetId || targetId === '__end__') {
+    nextItems.push(draggedItem);
+    return nextItems;
+  }
+
+  const targetIndex = nextItems.findIndex(item => item.id === targetId);
+  if (targetIndex === -1) {
+    nextItems.push(draggedItem);
+    return nextItems;
+  }
+
+  const insertIndex = placement === 'before' ? targetIndex : targetIndex + 1;
+  nextItems.splice(insertIndex, 0, draggedItem);
+  return nextItems;
+}
+
+function resetShortcutDragState() {
+  shortcutDragState.draggedId = null;
+  shortcutDragState.targetId = null;
+  shortcutDragState.placement = 'after';
+  clearShortcutDropIndicators();
 }
 
 function dedupeShortcutItems(items) {
@@ -806,7 +973,7 @@ function renderShortcutCard(item) {
   const fallback = escapeHtml((displayTitle || '?').trim().charAt(0).toUpperCase());
 
   return `
-    <div class="shortcut-chip">
+    <div class="shortcut-chip" data-shortcut-id="${shortcutId}" draggable="true">
       <button type="button" class="shortcut-chip-open" data-action="open-shortcut" data-shortcut-id="${shortcutId}" data-shortcut-url="${shortcutUrl}" aria-label="Open ${shortcutTitle}">
         <span class="shortcut-chip-icon">
           ${faviconUrl
@@ -846,6 +1013,7 @@ async function renderShortcutSection() {
 
   shortcutLinks = await loadShortcutItems();
   grid.innerHTML = `${shortcutLinks.map(renderShortcutCard).join('')}${renderShortcutAddButton()}`;
+  clearShortcutDropIndicators();
   section.style.display = 'block';
 }
 
@@ -855,15 +1023,19 @@ function closeShortcutEditor() {
   if (form) form.reset();
   if (editor) editor.style.display = 'none';
   shortcutEditorState = { mode: 'create', id: null };
+  shortcutSuggestionState.selectedUrl = '';
+  hideShortcutSuggestions();
 }
 
-function openShortcutEditor(item = null) {
+async function openShortcutEditor(item = null) {
   const editor = document.getElementById('shortcutEditor');
   const titleEl = document.getElementById('shortcutEditorTitle');
   const titleInput = document.getElementById('shortcutTitleInput');
   const urlInput = document.getElementById('shortcutUrlInput');
   const saveButton = document.getElementById('shortcutSaveButton');
   if (!editor || !titleInput || !urlInput || !saveButton) return;
+
+  await fetchOpenTabs();
 
   shortcutEditorState = item
     ? { mode: 'edit', id: item.id }
@@ -875,7 +1047,11 @@ function openShortcutEditor(item = null) {
   saveButton.textContent = item ? 'Update shortcut' : 'Save shortcut';
   titleInput.value = item?.title || '';
   urlInput.value = item?.url || '';
+  shortcutSuggestionState.anchorField = null;
+  shortcutSuggestionState.selectedUrl = item?.url || '';
+  shortcutSuggestionState.filterActive = false;
   editor.style.display = 'block';
+  renderShortcutSuggestions();
 
   setTimeout(() => {
     urlInput.focus();
@@ -948,6 +1124,21 @@ async function openShortcut(url) {
   }
 
   await chrome.tabs.create({ url: normalizedUrl, active: true });
+}
+
+async function reorderShortcutItems(draggedId, targetId, placement) {
+  if (!draggedId) return;
+
+  const currentItems = await loadShortcutItems();
+  const nextItems = moveShortcutItem(currentItems, draggedId, targetId, placement);
+  const changed = nextItems.length === currentItems.length
+    && nextItems.some((item, index) => item.id !== currentItems[index].id);
+
+  if (!changed) return;
+
+  await saveShortcutItems(nextItems);
+  await renderShortcutSection();
+  showToast('Shortcut order updated');
 }
 
 
@@ -1428,11 +1619,20 @@ document.addEventListener('click', async (e) => {
   const actionEl = e.target.closest('[data-action]');
   if (!actionEl) return;
 
+  if (
+    shortcutDragState.ignoreClicksUntil > performance.now()
+    && actionEl.closest('.shortcut-chip')
+  ) {
+    e.preventDefault();
+    e.stopPropagation();
+    return;
+  }
+
   const action = actionEl.dataset.action;
 
   // ---- Shortcut rail actions ----
   if (action === 'open-shortcut-form') {
-    openShortcutEditor();
+    await openShortcutEditor();
     return;
   }
 
@@ -1443,7 +1643,7 @@ document.addEventListener('click', async (e) => {
 
   if (action === 'edit-shortcut') {
     const shortcut = shortcutLinks.find(item => item.id === actionEl.dataset.shortcutId);
-    if (shortcut) openShortcutEditor(shortcut);
+    if (shortcut) await openShortcutEditor(shortcut);
     return;
   }
 
@@ -1457,6 +1657,19 @@ document.addEventListener('click', async (e) => {
   if (action === 'open-shortcut') {
     const shortcutUrl = actionEl.dataset.shortcutUrl;
     if (shortcutUrl) await openShortcut(shortcutUrl);
+    return;
+  }
+
+  if (action === 'select-shortcut-suggestion') {
+    const titleInput = document.getElementById('shortcutTitleInput');
+    const urlInput = document.getElementById('shortcutUrlInput');
+    if (!titleInput || !urlInput) return;
+
+    titleInput.value = actionEl.dataset.shortcutPickTitle || '';
+    urlInput.value = actionEl.dataset.shortcutPickUrl || '';
+    shortcutSuggestionState.selectedUrl = urlInput.value;
+    shortcutSuggestionState.filterActive = false;
+    renderShortcutSuggestions();
     return;
   }
 
@@ -1711,6 +1924,127 @@ document.addEventListener('submit', async (e) => {
   await persistShortcutFromForm();
 });
 
+document.addEventListener('focusin', (e) => {
+  if (e.target.id !== 'shortcutTitleInput' && e.target.id !== 'shortcutUrlInput') return;
+  shortcutSuggestionState.anchorField = e.target.id === 'shortcutTitleInput' ? 'title' : 'url';
+  showShortcutSuggestions({ filterActive: false });
+});
+
+document.addEventListener('input', (e) => {
+  if (e.target.id === 'shortcutTitleInput' || e.target.id === 'shortcutUrlInput') {
+    shortcutSuggestionState.anchorField = e.target.id === 'shortcutTitleInput' ? 'title' : 'url';
+    shortcutSuggestionState.selectedUrl = '';
+    showShortcutSuggestions({ filterActive: true });
+    return;
+  }
+
+  if (e.target.id !== 'archiveSearch') return;
+
+  const q = e.target.value.trim().toLowerCase();
+  const archiveList = document.getElementById('archiveList');
+  if (!archiveList) return;
+
+  (async () => {
+    try {
+      const { archived } = await getSavedTabs();
+
+      if (q.length < 2) {
+        archiveList.innerHTML = archived.map(item => renderArchiveItem(item)).join('');
+        return;
+      }
+
+      const results = archived.filter(item =>
+        (item.title || '').toLowerCase().includes(q) ||
+        (item.url || '').toLowerCase().includes(q)
+      );
+
+      archiveList.innerHTML = results.map(item => renderArchiveItem(item)).join('')
+        || '<div style="font-size:12px;color:var(--muted);padding:8px 0">No results</div>';
+    } catch (err) {
+      console.warn('[tab-out] Archive search failed:', err);
+    }
+  })();
+});
+
+document.addEventListener('pointerdown', (e) => {
+  const editor = document.getElementById('shortcutEditor');
+  if (!editor || editor.style.display === 'none') return;
+  if (editor.contains(e.target)) return;
+  hideShortcutSuggestions();
+});
+
+document.addEventListener('dragstart', (e) => {
+  const chip = e.target.closest('.shortcut-chip[data-shortcut-id]');
+  if (!chip) return;
+
+  shortcutDragState.draggedId = chip.dataset.shortcutId || null;
+  shortcutDragState.targetId = null;
+  shortcutDragState.placement = 'after';
+  if (e.dataTransfer) {
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', shortcutDragState.draggedId || '');
+  }
+
+  requestAnimationFrame(() => {
+    chip.classList.add('shortcut-dragging');
+  });
+});
+
+document.addEventListener('dragover', (e) => {
+  if (!shortcutDragState.draggedId) return;
+
+  const grid = document.getElementById('shortcutGrid');
+  if (!grid || !grid.contains(e.target)) return;
+  e.preventDefault();
+
+  const targetChip = e.target.closest('.shortcut-chip[data-shortcut-id]');
+  if (!targetChip) {
+    shortcutDragState.targetId = '__end__';
+    shortcutDragState.placement = 'after';
+    updateShortcutDropIndicator('__end__', 'after');
+    return;
+  }
+
+  const targetId = targetChip.dataset.shortcutId;
+  if (!targetId || targetId === shortcutDragState.draggedId) {
+    shortcutDragState.targetId = null;
+    shortcutDragState.placement = 'after';
+    updateShortcutDropIndicator(null, 'after');
+    return;
+  }
+
+  const rect = targetChip.getBoundingClientRect();
+  const placement = e.clientX < rect.left + rect.width / 2 ? 'before' : 'after';
+  shortcutDragState.targetId = targetId;
+  shortcutDragState.placement = placement;
+  updateShortcutDropIndicator(targetId, placement);
+});
+
+document.addEventListener('drop', async (e) => {
+  if (!shortcutDragState.draggedId) return;
+
+  const grid = document.getElementById('shortcutGrid');
+  if (!grid || !grid.contains(e.target)) {
+    resetShortcutDragState();
+    return;
+  }
+
+  e.preventDefault();
+  const draggedId = shortcutDragState.draggedId;
+  const targetId = shortcutDragState.targetId;
+  const placement = shortcutDragState.placement;
+  shortcutDragState.ignoreClicksUntil = performance.now() + 250;
+  resetShortcutDragState();
+
+  await reorderShortcutItems(draggedId, targetId, placement);
+});
+
+document.addEventListener('dragend', (e) => {
+  const chip = e.target.closest('.shortcut-chip[data-shortcut-id]');
+  if (chip) chip.classList.remove('shortcut-dragging');
+  resetShortcutDragState();
+});
+
 // ---- Archive toggle — expand/collapse the archive section ----
 document.addEventListener('click', (e) => {
   const toggle = e.target.closest('#archiveToggle');
@@ -1722,37 +2056,6 @@ document.addEventListener('click', (e) => {
     body.style.display = body.style.display === 'none' ? 'block' : 'none';
   }
 });
-
-// ---- Archive search — filter archived items as user types ----
-document.addEventListener('input', async (e) => {
-  if (e.target.id !== 'archiveSearch') return;
-
-  const q = e.target.value.trim().toLowerCase();
-  const archiveList = document.getElementById('archiveList');
-  if (!archiveList) return;
-
-  try {
-    const { archived } = await getSavedTabs();
-
-    if (q.length < 2) {
-      // Show all archived items
-      archiveList.innerHTML = archived.map(item => renderArchiveItem(item)).join('');
-      return;
-    }
-
-    // Filter by title or URL containing the query string
-    const results = archived.filter(item =>
-      (item.title || '').toLowerCase().includes(q) ||
-      (item.url  || '').toLowerCase().includes(q)
-    );
-
-    archiveList.innerHTML = results.map(item => renderArchiveItem(item)).join('')
-      || '<div style="font-size:12px;color:var(--muted);padding:8px 0">No results</div>';
-  } catch (err) {
-    console.warn('[tab-out] Archive search failed:', err);
-  }
-});
-
 
 /* ----------------------------------------------------------------
    INITIALIZE
