@@ -10,17 +10,6 @@ No server. No account. No external API calls. Just a Chrome extension.
 
 ---
 
-## Install with a coding agent
-
-Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
-
-```
-https://github.com/codeanywa/tab-out
-```
-
-The agent will walk you through it. Takes about 1 minute.
-
----
 
 ## Features
 
@@ -38,7 +27,7 @@ The agent will walk you through it. Takes about 1 minute.
 
 ---
 
-## Manual Setup
+## Manual Setup（Suggested）
 
 **1. Clone the repo**
 
@@ -56,6 +45,18 @@ git clone https://github.com/codeanywa/tab-out.git
 **3. Open a new tab**
 
 You'll see Tab Out.
+
+---
+
+## Install with a coding agent
+
+Send your coding agent (Claude Code, Codex, etc.) this repo and say **"install this"**:
+
+```
+https://github.com/codeanywa/tab-out
+```
+
+The agent will walk you through it. Takes about 1 minute.
 
 ---
 
