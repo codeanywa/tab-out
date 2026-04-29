@@ -9,6 +9,9 @@ It also adds a shortcuts strip at the top so you can pin fast links and keep the
 No server. No account. No external API calls. Just a Chrome extension.
 
 ---
+<img width="2624" height="1302" alt="image" src="https://github.com/user-attachments/assets/5fe1f337-db4f-4246-9477-77223b96f381" />
+
+
 
 
 ## Features
