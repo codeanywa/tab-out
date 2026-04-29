@@ -714,6 +714,7 @@ let domainGroups = [];
    SHORTCUTS — synced quick links shown in the sticky header
    ---------------------------------------------------------------- */
 const SHORTCUTS_STORAGE_KEY = 'quickLinks';
+const SHORTCUT_SUGGESTION_BATCH_SIZE = 12;
 let shortcutLinks = [];
 let shortcutEditorState = { mode: 'create', id: null };
 let shortcutDragState = {
@@ -727,6 +728,8 @@ let shortcutSuggestionState = {
   filterActive: false,
   anchorField: null,
   selectedUrl: '',
+  matches: [],
+  renderedCount: 0,
 };
 
 function escapeHtml(value) {
@@ -811,28 +814,8 @@ function getShortcutSuggestionMatches() {
   });
 }
 
-function renderShortcutSuggestions() {
-  const panel = document.getElementById('shortcutSuggestionPanel');
-  const list = document.getElementById('shortcutSuggestionList');
-  const urlInput = document.getElementById('shortcutUrlInput');
-  if (!panel || !list) return;
-
-  if (!shortcutSuggestionState.visible) {
-    panel.hidden = true;
-    list.innerHTML = '';
-    return;
-  }
-
-  const currentUrl = normalizeShortcutUrl(urlInput?.value) || shortcutSuggestionState.selectedUrl;
-  const matches = getShortcutSuggestionMatches();
-
-  if (matches.length === 0) {
-    list.innerHTML = '<div class="shortcut-suggestion-empty">No matching open tabs</div>';
-    panel.hidden = false;
-    return;
-  }
-
-  list.innerHTML = matches.slice(0, 10).map(item => {
+function renderShortcutSuggestionItems(items, currentUrl) {
+  return items.map(item => {
     const safeTitle = escapeHtml(item.title);
     const safeUrl = escapeHtml(item.url);
     const selectedClass = currentUrl && currentUrl === item.url ? ' is-selected' : '';
@@ -852,20 +835,72 @@ function renderShortcutSuggestions() {
         ${activeBadge}
       </button>`;
   }).join('');
+}
+
+function renderShortcutSuggestions({ reset = true } = {}) {
+  const panel = document.getElementById('shortcutSuggestionPanel');
+  const list = document.getElementById('shortcutSuggestionList');
+  const urlInput = document.getElementById('shortcutUrlInput');
+  if (!panel || !list) return;
+
+  if (!shortcutSuggestionState.visible) {
+    panel.hidden = true;
+    list.innerHTML = '';
+    return;
+  }
+
+  const currentUrl = normalizeShortcutUrl(urlInput?.value) || shortcutSuggestionState.selectedUrl;
+  if (reset) {
+    shortcutSuggestionState.matches = getShortcutSuggestionMatches();
+    shortcutSuggestionState.renderedCount = 0;
+    list.innerHTML = '';
+  } else if (!Array.isArray(shortcutSuggestionState.matches)) {
+    shortcutSuggestionState.matches = getShortcutSuggestionMatches();
+    shortcutSuggestionState.renderedCount = 0;
+  }
+
+  const matches = shortcutSuggestionState.matches || [];
+
+  if (matches.length === 0) {
+    list.innerHTML = '<div class="shortcut-suggestion-empty">No matching open tabs</div>';
+    panel.hidden = false;
+    return;
+  }
+
+  const startIndex = shortcutSuggestionState.renderedCount;
+  const nextIndex = Math.min(matches.length, startIndex + SHORTCUT_SUGGESTION_BATCH_SIZE);
+  const batch = matches.slice(startIndex, nextIndex);
+
+  if (batch.length === 0) {
+    panel.hidden = false;
+    return;
+  }
+
+  list.insertAdjacentHTML('beforeend', renderShortcutSuggestionItems(batch, currentUrl));
+  shortcutSuggestionState.renderedCount = nextIndex;
   panel.hidden = false;
 }
 
 function showShortcutSuggestions({ filterActive = false } = {}) {
   shortcutSuggestionState.visible = true;
   shortcutSuggestionState.filterActive = filterActive;
-  renderShortcutSuggestions();
+  renderShortcutSuggestions({ reset: true });
 }
 
 function hideShortcutSuggestions() {
   shortcutSuggestionState.visible = false;
   shortcutSuggestionState.filterActive = false;
   shortcutSuggestionState.anchorField = null;
+  shortcutSuggestionState.matches = [];
+  shortcutSuggestionState.renderedCount = 0;
   renderShortcutSuggestions();
+}
+
+function loadMoreShortcutSuggestions() {
+  if (!shortcutSuggestionState.visible) return;
+  if (!Array.isArray(shortcutSuggestionState.matches) || shortcutSuggestionState.matches.length === 0) return;
+  if (shortcutSuggestionState.renderedCount >= shortcutSuggestionState.matches.length) return;
+  renderShortcutSuggestions({ reset: false });
 }
 
 function clearShortcutDropIndicators() {
@@ -1663,13 +1698,19 @@ document.addEventListener('click', async (e) => {
   if (action === 'select-shortcut-suggestion') {
     const titleInput = document.getElementById('shortcutTitleInput');
     const urlInput = document.getElementById('shortcutUrlInput');
+    const suggestionList = document.getElementById('shortcutSuggestionList');
     if (!titleInput || !urlInput) return;
 
     titleInput.value = actionEl.dataset.shortcutPickTitle || '';
     urlInput.value = actionEl.dataset.shortcutPickUrl || '';
     shortcutSuggestionState.selectedUrl = urlInput.value;
     shortcutSuggestionState.filterActive = false;
-    renderShortcutSuggestions();
+    if (suggestionList) {
+      suggestionList.querySelectorAll('.shortcut-suggestion-item.is-selected').forEach(node => {
+        node.classList.remove('is-selected');
+      });
+      actionEl.classList.add('is-selected');
+    }
     return;
   }
 
@@ -1965,6 +2006,14 @@ document.addEventListener('input', (e) => {
     }
   })();
 });
+
+document.addEventListener('scroll', (e) => {
+  if (e.target.id !== 'shortcutSuggestionList') return;
+  const list = e.target;
+  if (!shortcutSuggestionState.visible) return;
+  if (list.scrollTop + list.clientHeight < list.scrollHeight - 24) return;
+  loadMoreShortcutSuggestions();
+}, true);
 
 document.addEventListener('pointerdown', (e) => {
   const editor = document.getElementById('shortcutEditor');
