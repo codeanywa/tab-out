@@ -648,6 +648,52 @@ header {
   white-space: nowrap;
 }
 
+.open-tabs-filter {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+
+.open-tabs-filter-input {
+  font-family: 'DM Sans', sans-serif;
+  font-size: 12px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 1px solid var(--warm-gray);
+  border-radius: 6px;
+  background: var(--card-bg);
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+.open-tabs-filter-input:focus {
+  border-color: var(--accent-amber);
+  box-shadow: 0 0 0 3px rgba(200, 113, 58, 0.08);
+}
+
+.open-tabs-filter-input.is-invalid {
+  border-color: rgba(179, 90, 90, 0.7);
+  box-shadow: 0 0 0 3px rgba(179, 90, 90, 0.08);
+}
+
+.open-tabs-filter-help {
+  font-size: 11px;
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.open-tabs-filter-error {
+  font-size: 11px;
+  color: var(--status-abandoned);
+  line-height: 1.4;
+}
+
+.open-tabs-empty-state {
+  margin-top: 4px;
+}
+
 /* ---- Mission Cards ---- */
 .missions {
   columns: 280px;

@@ -22,6 +22,7 @@ No server. No account. No external API calls. Just a Chrome extension.
 - **Close tabs with style** with swoosh sound + confetti burst
 - **Duplicate detection** flags when you have the same page open twice, with one-click cleanup
 - **Click any tab to jump to it** across windows, no new tab opened
+- **Filter open tabs** by title, URL, or `/regex/flags` directly above the tab grid
 - **Save for later** bookmark tabs to a checklist before closing them
 - **Localhost grouping** shows port numbers next to each tab so you can tell your vibe coding projects apart
 - **Expandable groups** show the first 8 tabs with a clickable "+N more"
@@ -68,6 +69,7 @@ The agent will walk you through it. Takes about 1 minute.
 ```
 You open a new tab
   -> Tab Out shows your open tabs grouped by domain
+  -> Use the filter box above the grid to search by title, URL, or /regex/flags
   -> Homepages (Gmail, X, etc.) get their own group at the top
   -> Click any tab title to jump to it
   -> Close groups you're done with (swoosh + confetti)

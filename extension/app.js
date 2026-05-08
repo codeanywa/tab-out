@@ -454,20 +454,37 @@ function checkAndShowEmptyState() {
   const remaining = missionsEl.querySelectorAll('.mission-card:not(.closing)').length;
   if (remaining > 0) return;
 
+  const filterState = parseOpenTabsFilterQuery(document.getElementById('openTabsFilter')?.value || '');
+  openTabsFilterState = filterState;
+
+  const hasFilter = Boolean(filterState.rawQuery);
+  const emptyTitle = filterState.error
+    ? 'Invalid regex'
+    : hasFilter
+      ? `No matches for &quot;${escapeHtml(filterState.rawQuery)}&quot;`
+      : 'Inbox zero, but for tabs.';
+  const emptySubtitle = filterState.error
+    ? 'Fix the pattern or clear the filter to see all tabs.'
+    : hasFilter
+      ? 'Try a different title, URL, or /regex/flags pattern.'
+      : "You're free.";
+
   missionsEl.innerHTML = `
-    <div class="missions-empty-state">
+    <div class="missions-empty-state open-tabs-empty-state">
       <div class="empty-checkmark">
         <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
         </svg>
       </div>
-      <div class="empty-title">Inbox zero, but for tabs.</div>
-      <div class="empty-subtitle">You're free.</div>
+      <div class="empty-title">${emptyTitle}</div>
+      <div class="empty-subtitle">${emptySubtitle}</div>
     </div>
   `;
 
   const countEl = document.getElementById('openTabsSectionCount');
-  if (countEl) countEl.textContent = '0 domains';
+  if (countEl) {
+    countEl.textContent = hasFilter ? '0 matching tabs' : '0 domains';
+  }
 }
 
 /**
@@ -691,6 +708,77 @@ function smartTitle(title, url) {
   return title || url;
 }
 
+function parseOpenTabsFilterQuery(rawQuery) {
+  const trimmed = String(rawQuery || '').trim();
+  const state = {
+    rawQuery: trimmed,
+    isRegex: false,
+    matcher: null,
+    error: '',
+  };
+
+  if (!trimmed) return state;
+
+  const regexLiteral = trimmed.match(/^\/(.*)\/([dgimsuvy]*)$/);
+  if (regexLiteral) {
+    const [, pattern, flags] = regexLiteral;
+    try {
+      state.matcher = new RegExp(pattern, flags);
+      state.isRegex = true;
+    } catch (err) {
+      state.error = err instanceof Error ? err.message : 'Invalid regex';
+    }
+    return state;
+  }
+
+  state.matcher = trimmed.toLowerCase();
+  return state;
+}
+
+function getOpenTabSearchText(tab) {
+  let hostname = '';
+  let pathname = '';
+
+  try {
+    if (tab.url) {
+      const parsed = new URL(tab.url);
+      hostname = parsed.hostname || '';
+      pathname = parsed.pathname || '';
+    }
+  } catch {
+    hostname = '';
+    pathname = '';
+  }
+
+  const strippedTitle = stripTitleNoise(tab.title || '');
+  const smart = smartTitle(strippedTitle, tab.url);
+  const clean = cleanTitle(smart, hostname);
+
+  return [
+    clean,
+    smart,
+    strippedTitle,
+    tab.title || '',
+    tab.url || '',
+    hostname,
+    pathname,
+  ].filter(Boolean).join(' ');
+}
+
+function matchesOpenTabFilter(tab, filterState) {
+  if (!filterState?.rawQuery) return true;
+  if (filterState.error) return false;
+
+  const searchText = getOpenTabSearchText(tab);
+
+  if (filterState.isRegex && filterState.matcher instanceof RegExp) {
+    filterState.matcher.lastIndex = 0;
+    return filterState.matcher.test(searchText);
+  }
+
+  return searchText.toLowerCase().includes(filterState.matcher || '');
+}
+
 
 /* ----------------------------------------------------------------
    SVG ICON STRINGS
@@ -708,6 +796,12 @@ const ICONS = {
    IN-MEMORY STORE FOR OPEN-TAB GROUPS
    ---------------------------------------------------------------- */
 let domainGroups = [];
+let openTabsFilterState = {
+  rawQuery: '',
+  isRegex: false,
+  matcher: null,
+  error: '',
+};
 
 
 /* ----------------------------------------------------------------
@@ -1497,6 +1591,9 @@ async function renderStaticDashboard() {
   // --- Fetch tabs ---
   await Promise.all([renderShortcutSection(), fetchOpenTabs()]);
   const realTabs = getRealTabs();
+  const filterState = parseOpenTabsFilterQuery(document.getElementById('openTabsFilter')?.value || '');
+  openTabsFilterState = filterState;
+  const visibleTabs = realTabs.filter(tab => matchesOpenTabFilter(tab, filterState));
 
   // --- Group tabs by domain ---
   // Landing pages (Gmail inbox, Twitter home, etc.) get their own special group
@@ -1555,7 +1652,7 @@ async function renderStaticDashboard() {
     } catch { return null; }
   }
 
-  for (const tab of realTabs) {
+  for (const tab of visibleTabs) {
     try {
       if (isLandingPage(tab.url)) {
         landingTabs.push(tab);
@@ -1616,13 +1713,48 @@ async function renderStaticDashboard() {
   const openTabsSectionCount = document.getElementById('openTabsSectionCount');
   const openTabsSectionTitle = document.getElementById('openTabsSectionTitle');
 
-  if (domainGroups.length > 0 && openTabsSection) {
+  if (openTabsSection && openTabsMissionsEl && openTabsSectionCount) {
     if (openTabsSectionTitle) openTabsSectionTitle.textContent = 'Open tabs';
-    openTabsSectionCount.innerHTML = `${domainGroups.length} domain${domainGroups.length !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${realTabs.length} tabs</button>`;
-    openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
+
+    const visibleTabCount = visibleTabs.length;
+    const visibleDomainCount = domainGroups.length;
+    const hasFilter = Boolean(filterState.rawQuery);
+    const closeAllButton = visibleTabCount > 0
+      ? ` &nbsp;&middot;&nbsp; <button class="action-btn close-tabs" data-action="close-all-open-tabs" style="font-size:11px;padding:3px 10px;">${ICONS.close} Close all ${hasFilter ? 'visible ' : ''}${visibleTabCount} tab${visibleTabCount !== 1 ? 's' : ''}</button>`
+      : '';
+
+    openTabsSectionCount.innerHTML = hasFilter
+      ? `${visibleDomainCount} domain${visibleDomainCount !== 1 ? 's' : ''} &nbsp;&middot;&nbsp; ${visibleTabCount} matching tab${visibleTabCount !== 1 ? 's' : ''}${closeAllButton}`
+      : `${visibleDomainCount} domain${visibleDomainCount !== 1 ? 's' : ''}${closeAllButton}`;
+
+    if (visibleDomainCount > 0) {
+      openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
+    } else {
+      const emptyTitle = filterState.error
+        ? 'Invalid regex'
+        : hasFilter
+          ? `No matches for &quot;${escapeHtml(filterState.rawQuery)}&quot;`
+          : 'No open tabs right now.';
+      const emptySubtitle = filterState.error
+        ? 'Fix the pattern or clear the filter to see all tabs.'
+        : hasFilter
+          ? 'Try a different title, URL, or /regex/flags pattern.'
+          : 'Open a page and it will appear here.';
+
+      openTabsMissionsEl.innerHTML = `
+        <div class="missions-empty-state open-tabs-empty-state">
+          <div class="empty-checkmark">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+            </svg>
+          </div>
+          <div class="empty-title">${emptyTitle}</div>
+          <div class="empty-subtitle">${emptySubtitle}</div>
+        </div>
+      `;
+    }
+
     openTabsSection.style.display = 'block';
-  } else if (openTabsSection) {
-    openTabsSection.style.display = 'none';
   }
 
   // --- Footer stats ---
@@ -1875,15 +2007,7 @@ document.addEventListener('click', async (e) => {
     if (!group) return;
 
     const urls      = group.tabs.map(t => t.url);
-    // Landing pages and custom groups (whose domain key isn't a real hostname)
-    // must use exact URL matching to avoid closing unrelated tabs
-    const useExact  = group.domain === '__landing-pages__' || !!group.label;
-
-    if (useExact) {
-      await closeTabsExact(urls);
-    } else {
-      await closeTabsByUrls(urls);
-    }
+    await closeTabsExact(urls);
 
     if (card) {
       playCloseSound();
@@ -1940,10 +2064,9 @@ document.addEventListener('click', async (e) => {
 
   // ---- Close ALL open tabs ----
   if (action === 'close-all-open-tabs') {
-    const allUrls = openTabs
-      .filter(t => t.url && !t.url.startsWith('chrome') && !t.url.startsWith('about:'))
-      .map(t => t.url);
-    await closeTabsByUrls(allUrls);
+    const hasFilter = Boolean(document.getElementById('openTabsFilter')?.value.trim());
+    const allUrls = domainGroups.flatMap(group => (group.tabs || []).map(tab => tab.url)).filter(Boolean);
+    await closeTabsExact(allUrls);
     playCloseSound();
 
     document.querySelectorAll('#openTabsMissions .mission-card').forEach(c => {
@@ -1954,7 +2077,7 @@ document.addEventListener('click', async (e) => {
       animateCardOut(c);
     });
 
-    showToast('All tabs closed. Fresh start.');
+    showToast(hasFilter ? 'Closed all visible tabs.' : 'All tabs closed. Fresh start.');
     return;
   }
 });
@@ -1972,6 +2095,11 @@ document.addEventListener('focusin', (e) => {
 });
 
 document.addEventListener('input', (e) => {
+  if (e.target.id === 'openTabsFilter') {
+    void renderStaticDashboard();
+    return;
+  }
+
   if (e.target.id === 'shortcutTitleInput' || e.target.id === 'shortcutUrlInput') {
     shortcutSuggestionState.anchorField = e.target.id === 'shortcutTitleInput' ? 'title' : 'url';
     shortcutSuggestionState.selectedUrl = '';
