@@ -107,13 +107,13 @@
           type="text"
           class="open-tabs-filter-input"
           id="openTabsFilter"
-          placeholder="Filter open tabs by title, URL, or /regex/flags"
+          placeholder="Filter tabs by title, domain, path, or query key"
           autocomplete="off"
           spellcheck="false"
           aria-label="Filter open tabs"
           aria-describedby="openTabsFilterHelp openTabsFilterError">
         <div class="open-tabs-filter-help" id="openTabsFilterHelp">
-          Plain text is case-insensitive. Use /pattern/flags for regex.
+          Fuzzy matching is case-insensitive. It searches titles plus meaningful URL parts like domain, path, and query keys.
         </div>
         <div class="open-tabs-filter-error" id="openTabsFilterError" hidden></div>
       </div>

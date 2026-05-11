@@ -458,16 +458,12 @@ function checkAndShowEmptyState() {
   openTabsFilterState = filterState;
 
   const hasFilter = Boolean(filterState.rawQuery);
-  const emptyTitle = filterState.error
-    ? 'Invalid regex'
-    : hasFilter
-      ? `No matches for &quot;${escapeHtml(filterState.rawQuery)}&quot;`
-      : 'Inbox zero, but for tabs.';
-  const emptySubtitle = filterState.error
-    ? 'Fix the pattern or clear the filter to see all tabs.'
-    : hasFilter
-      ? 'Try a different title, URL, or /regex/flags pattern.'
-      : "You're free.";
+  const emptyTitle = hasFilter
+    ? `No matches for &quot;${escapeHtml(filterState.rawQuery)}&quot;`
+    : 'Inbox zero, but for tabs.';
+  const emptySubtitle = hasFilter
+    ? 'Try fewer letters or a different title, domain, path, or query key.'
+    : "You're free.";
 
   missionsEl.innerHTML = `
     <div class="missions-empty-state open-tabs-empty-state">
@@ -708,46 +704,91 @@ function smartTitle(title, url) {
   return title || url;
 }
 
+function normalizeFuzzyText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function compactFuzzyText(value) {
+  return normalizeFuzzyText(value).replace(/[^a-z0-9]+/g, '');
+}
+
+function isFuzzySubsequence(needle, haystack) {
+  if (!needle) return true;
+
+  let needleIndex = 0;
+
+  for (const char of haystack) {
+    if (char === needle[needleIndex]) needleIndex += 1;
+    if (needleIndex === needle.length) return true;
+  }
+
+  return false;
+}
+
 function parseOpenTabsFilterQuery(rawQuery) {
   const trimmed = String(rawQuery || '').trim();
   const state = {
     rawQuery: trimmed,
-    isRegex: false,
     matcher: null,
-    error: '',
   };
 
   if (!trimmed) return state;
 
-  const regexLiteral = trimmed.match(/^\/(.*)\/([dgimsuvy]*)$/);
-  if (regexLiteral) {
-    const [, pattern, flags] = regexLiteral;
-    try {
-      state.matcher = new RegExp(pattern, flags);
-      state.isRegex = true;
-    } catch (err) {
-      state.error = err instanceof Error ? err.message : 'Invalid regex';
-    }
-    return state;
-  }
+  const normalized = normalizeFuzzyText(trimmed).trim();
+  const tokens = normalized
+    .split(/\s+/)
+    .map(token => ({
+      raw: token,
+      compact: token.replace(/[^a-z0-9]+/g, ''),
+    }))
+    .filter(token => token.raw.length > 0);
 
-  state.matcher = trimmed.toLowerCase();
+  state.matcher = {
+    normalized,
+    tokens,
+  };
+
   return state;
 }
 
-function getOpenTabSearchText(tab) {
+function getOpenTabSearchFields(tab) {
   let hostname = '';
   let pathname = '';
+  let sanitizedUrl = '';
+  let queryKeys = [];
+  let nestedUrlFields = [];
 
   try {
     if (tab.url) {
       const parsed = new URL(tab.url);
       hostname = parsed.hostname || '';
       pathname = parsed.pathname || '';
+      sanitizedUrl = `${parsed.origin === 'null' ? parsed.protocol : parsed.origin}${pathname}`;
+      queryKeys = [...new Set(Array.from(parsed.searchParams.keys()).filter(Boolean))];
+      nestedUrlFields = Array.from(parsed.searchParams.values()).flatMap(value => {
+        if (!/^https?:\/\//i.test(value || '')) return [];
+
+        try {
+          const nestedUrl = new URL(value);
+          return [
+            nestedUrl.hostname || '',
+            nestedUrl.pathname || '',
+            `${nestedUrl.origin === 'null' ? nestedUrl.protocol : nestedUrl.origin}${nestedUrl.pathname}`,
+          ].filter(Boolean);
+        } catch {
+          return [];
+        }
+      });
     }
   } catch {
     hostname = '';
     pathname = '';
+    sanitizedUrl = tab.url || '';
+    queryKeys = [];
+    nestedUrlFields = [];
   }
 
   const strippedTitle = stripTitleNoise(tab.title || '');
@@ -759,24 +800,33 @@ function getOpenTabSearchText(tab) {
     smart,
     strippedTitle,
     tab.title || '',
-    tab.url || '',
     hostname,
     pathname,
-  ].filter(Boolean).join(' ');
+    sanitizedUrl,
+    ...queryKeys,
+    ...nestedUrlFields,
+  ].filter(Boolean);
+}
+
+function getOpenTabSearchText(tab) {
+  return getOpenTabSearchFields(tab).join(' ');
 }
 
 function matchesOpenTabFilter(tab, filterState) {
   if (!filterState?.rawQuery) return true;
-  if (filterState.error) return false;
 
-  const searchText = getOpenTabSearchText(tab);
+  const searchFields = getOpenTabSearchFields(tab);
+  const normalizedFields = searchFields.map(field => normalizeFuzzyText(field));
+  const compactFields = normalizedFields.map(field => field.replace(/[^a-z0-9]+/g, '')).filter(Boolean);
+  const searchTerms = normalizedFields.flatMap(field => field.split(/[^a-z0-9]+/).filter(Boolean));
 
-  if (filterState.isRegex && filterState.matcher instanceof RegExp) {
-    filterState.matcher.lastIndex = 0;
-    return filterState.matcher.test(searchText);
-  }
-
-  return searchText.toLowerCase().includes(filterState.matcher || '');
+  return (filterState.matcher?.tokens || []).every(token => {
+    if (normalizedFields.some(field => field.includes(token.raw))) return true;
+    if (!token.compact) return false;
+    if (compactFields.some(field => field.includes(token.compact))) return true;
+    if (token.compact.length < 2) return false;
+    return searchTerms.some(term => isFuzzySubsequence(token.compact, term));
+  });
 }
 
 
@@ -798,9 +848,7 @@ const ICONS = {
 let domainGroups = [];
 let openTabsFilterState = {
   rawQuery: '',
-  isRegex: false,
   matcher: null,
-  error: '',
 };
 
 
@@ -1730,16 +1778,12 @@ async function renderStaticDashboard() {
     if (visibleDomainCount > 0) {
       openTabsMissionsEl.innerHTML = domainGroups.map(g => renderDomainCard(g)).join('');
     } else {
-      const emptyTitle = filterState.error
-        ? 'Invalid regex'
-        : hasFilter
-          ? `No matches for &quot;${escapeHtml(filterState.rawQuery)}&quot;`
-          : 'No open tabs right now.';
-      const emptySubtitle = filterState.error
-        ? 'Fix the pattern or clear the filter to see all tabs.'
-        : hasFilter
-          ? 'Try a different title, URL, or /regex/flags pattern.'
-          : 'Open a page and it will appear here.';
+      const emptyTitle = hasFilter
+        ? `No matches for &quot;${escapeHtml(filterState.rawQuery)}&quot;`
+        : 'No open tabs right now.';
+      const emptySubtitle = hasFilter
+        ? 'Try fewer letters or a different title, domain, path, or query key.'
+        : 'Open a page and it will appear here.';
 
       openTabsMissionsEl.innerHTML = `
         <div class="missions-empty-state open-tabs-empty-state">
